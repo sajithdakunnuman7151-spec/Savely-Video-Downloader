@@ -7,6 +7,9 @@ import '../downloader/download_bottom_sheet.dart';
 import '../downloader/downloads_screen.dart';
 import 'video_search_delegate.dart';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -48,7 +51,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Copy කරපු දේවල් කියවලා ඒක ලින්ක් එකක්ද කියලා බලන Function එක
   Future<void> _checkClipboard() async {
-    // ෆෝන් එකේ කොපි කරලා තියෙන දේ ගන්නවා
+    // 🌟 වෙබ් බ්‍රව්සර් එකේදී ඉබේම Clipboard එක කියවන්න බැරි නිසා, මෙතනින් කෝඩ් එක නවත්වනවා.
+    if (kIsWeb) return; 
+
+    // ෆෝන් එකේ කොපි කරලා තියෙන දේ ගන්නවා (මේක වැඩ කරන්නේ Android/iOS වල විතරයි දැන්)
     ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
 
     if (data != null && data.text != null) {
@@ -82,6 +88,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(

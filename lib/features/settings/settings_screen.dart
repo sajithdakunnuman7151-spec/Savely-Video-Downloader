@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme_provider.dart';
 import '../../core/native_bridge.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -47,6 +48,16 @@ class SettingsScreen extends ConsumerWidget {
           activeThumbColor: Colors.red,
           value: false, // පසුව මේකත් Riverpod එකෙන් manage කරමු
           onChanged: (value) {
+            if (kIsWeb) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Floating Download Button එක වැඩ කරන්නේ Android වල පමණි!'),
+                              backgroundColor: Colors.blue,
+                            ),
+                          );
+                          return; // මීට පල්ලෙහා තියෙන NativeBridge කේත ක්‍රියාත්මක වෙන්නේ නැත
+                        }
+
             if (value) {
               // On කරද්දී Android පැත්තෙන් Permission ඉල්ලනවා
               NativeBridge.requestPermissions();

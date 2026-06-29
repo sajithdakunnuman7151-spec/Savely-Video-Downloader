@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DownloadsScreen extends StatefulWidget {
   const DownloadsScreen({super.key});
@@ -24,14 +25,24 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   // ෆෝන් එකේ Storage එකට ගිහින් අපේ ෆයිල්ස් ටික හොයන Function එක
   Future<void> _loadDownloadedFiles() async {
     setState(() => _isLoading = true);
-
+    
     try {
+      // 🌟 වෙබ් එක සඳහා ආරක්ෂිත වැට මෙන්න
+      if (kIsWeb) {
+        setState(() {
+          _files = []; 
+          _isLoading = false;
+        });
+        return;
+      }
+      // මීට යටින් තියෙන්නේ ඔයාගේ පරණ Android කෝඩ් එකමයි
       Directory? directory;
       if (Platform.isAndroid) {
         directory = Directory('/storage/emulated/0/Download');
       } else {
         directory = await getApplicationDocumentsDirectory();
       }
+     
 
       if (directory.existsSync()) {
         // ෆෝල්ඩර් එකේ තියෙන ඔක්කොම ෆයිල්ස් අරන්, අපේ App එකෙන් ආපු ඒවා විතරක් පෙරලා ගන්නවා

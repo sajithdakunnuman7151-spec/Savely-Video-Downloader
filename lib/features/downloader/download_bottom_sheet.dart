@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import 'package:dio/dio.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class DownloadBottomSheet extends StatefulWidget {
   final String url;
@@ -71,17 +72,28 @@ class _DownloadBottomSheetState extends State<DownloadBottomSheet> {
     }
   }
 
-  // 2. ඩවුන්ලෝඩ් කිරීම ආරම්භ කිරීම
   Future<void> _startDownload(StreamInfo streamInfo, bool isAudio) async {
+    // 🌟 වෙබ් එකේදී ඩවුන්ලෝඩ් කරන්න හැදුවොත් Crash වෙන්නේ නැතුව මැසේජ් එකක් දෙනවා
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Downloads are only supported on Android devices!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return; // මීට පල්ලෙහා තියෙන Permission කේත ක්‍රියාත්මක වෙන්නේ නැත
+    }
+
     setState(() {
       _isDownloading = true;
       _progress = 0.0;
       _statusMessage = 'Requesting storage permission...';
     });
 
-    // Android Storage Permission එක ඉල්ලීම
+    
     if (Platform.isAndroid) {
       var status = await Permission.storage.request();
+      
       if (!status.isGranted) {
         var manageStatus = await Permission.manageExternalStorage.request();
         if (!manageStatus.isGranted) {
