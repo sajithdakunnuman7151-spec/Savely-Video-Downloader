@@ -1,24 +1,20 @@
 // lib/features/downloader/download_bottom_sheet.dart
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:dio/dio.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'download_provider.dart';
+import '../settings/download_location.dart';
 
 class DownloadBottomSheet extends StatefulWidget {
-  final String url;
-  const DownloadBottomSheet({super.key, required this.url});
+  final String videoUrl;
+  const DownloadBottomSheet({super.key, required this.videoUrl});
 
-  // වෙනත් තැන් වලින් මේ මෙනුව ඕපන් කරන්න පාවිච්චි කරන Function එක
   static void show(BuildContext context, String url) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DownloadBottomSheet(url: url),
+      backgroundColor: Colors.transparent,
+      builder: (context) => DownloadBottomSheet(videoUrl: url),
     );
   }
 
@@ -28,224 +24,133 @@ class DownloadBottomSheet extends StatefulWidget {
 
 class _DownloadBottomSheetState extends State<DownloadBottomSheet> {
   final YoutubeExplode _yt = YoutubeExplode();
-  final Dio _dio = Dio();
-
-  bool _isLoading = true;
   Video? _video;
   StreamManifest? _manifest;
-
-  bool _isDownloading = false;
-  double _progress = 0.0;
-  String _statusMessage = 'Getting video details...';
+  bool _isLoading = true;
+  String _error = '';
 
   @override
   void initState() {
     super.initState();
-    _fetchVideoDetails();
+    _fetchVideoDetails(); // UI එක ආව ගමන් Data අදින්න පටන් ගන්නවා (Speed එක වැඩි වෙයි)
+  }
+
+  Future<void> _fetchVideoDetails() async {
+    try {
+    
+      var videoId = VideoId(widget.videoUrl); 
+      
+      var video = await _yt.videos.get(videoId);
+      var manifest = await _yt.videos.streamsClient.getManifest(videoId);
+      
+      if (mounted) {
+        setState(() {
+          _video = video;
+          _manifest = manifest;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() { 
+          _isLoading = false; 
+          
+          _error = 'Error: ${e.toString()}'; 
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
-    _yt.close(); // මතකය ඉතිරි කරගන්න අපි මේක close කරනවා
+    _yt.close();
     super.dispose();
-  }
-
-  // 1. අන්තර්ජාලයෙන් වීඩියෝ එකේ විස්තර සහ කොලිටි ටික ගෙනෙනවා
-  Future<void> _fetchVideoDetails() async {
-    try {
-      var videoId = VideoId(widget.url);
-      _video = await _yt.videos.get(videoId);
-      _manifest = await _yt.videos.streamsClient.getManifest(videoId);
-      
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _statusMessage = 'Error loading video. Invalid link?';
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _startDownload(StreamInfo streamInfo, bool isAudio) async {
-    // 🌟 වෙබ් එකේදී ඩවුන්ලෝඩ් කරන්න හැදුවොත් Crash වෙන්නේ නැතුව මැසේජ් එකක් දෙනවා
-    if (kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Downloads are only supported on Android devices!'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return; // මීට පල්ලෙහා තියෙන Permission කේත ක්‍රියාත්මක වෙන්නේ නැත
-    }
-
-    setState(() {
-      _isDownloading = true;
-      _progress = 0.0;
-      _statusMessage = 'Requesting storage permission...';
-    });
-
-    
-    if (Platform.isAndroid) {
-      var status = await Permission.storage.request();
-      
-      if (!status.isGranted) {
-        var manageStatus = await Permission.manageExternalStorage.request();
-        if (!manageStatus.isGranted) {
-          setState(() {
-            _statusMessage = 'Storage Permission Denied!';
-            _isDownloading = false;
-          });
-          return;
-        }
-      }
-    }
-
-    try {
-      setState(() {
-        _statusMessage = 'Downloading...';
-      });
-
-      // ෆයිල් එකේ නම හදාගන්නවා (විශේෂ අකුරු අයින් කරලා)
-      String cleanTitle = _video!.title.replaceAll(RegExp(r'[^\w\s]+'), '').replaceAll(' ', '_');
-      String ext = isAudio ? 'mp3' : 'mp4';
-      String fileName = '${cleanTitle}_Savely.$ext';
-
-      // සේව් කරන තැන (Android Downloads ෆෝල්ඩරය)
-      Directory dir = Directory('/storage/emulated/0/Download');
-      if (!dir.existsSync()) {
-        dir.createSync(recursive: true);
-      }
-      String savePath = '${dir.path}/$fileName';
-
-      // Dio Package එක හරහා ෆයිල් එක ඩවුන්ලෝඩ් කරනවා
-      await _dio.download(
-        streamInfo.url.toString(),
-        savePath,
-        onReceiveProgress: (received, total) {
-          if (total != -1) {
-            setState(() {
-              _progress = received / total; // ප්‍රතිශතය හදනවා
-            });
-          }
-        },
-      );
-
-      setState(() {
-        _statusMessage = 'Download Complete! 🎉';
-        _progress = 1.0;
-      });
-
-      // තත්පර 2කින් පස්සේ මෙනුව ඉබේම වැහෙනවා
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) Navigator.pop(context);
-      });
-
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Download failed!';
-        _isDownloading = false;
-      });
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
-      height: MediaQuery.of(context).size.height * 0.6,
-      child: _isLoading 
-        ? Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(color: Colors.red),
-              const SizedBox(height: 16),
-              Text(_statusMessage, style: const TextStyle(fontWeight: FontWeight.bold)),
-            ],
-          )
-        : _isDownloading
-          ? Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.all(16.0),
+      height: MediaQuery.of(context).size.height * 0.7, // Screen එකෙන් 70% ක් උසයි
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+          ),
+          const SizedBox(height: 16),
+          
+          if (_isLoading)
+            const Expanded(child: Center(child: CircularProgressIndicator(color: Colors.redAccent)))
+          else if (_error.isNotEmpty)
+            Expanded(child: Center(child: Text(_error, style: const TextStyle(color: Colors.red))))
+          else ...[
+            // 1. වීඩියෝවේ නම සහ රූපය
+            Row(
               children: [
-                Text(_statusMessage, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
-                LinearProgressIndicator(
-                  value: _progress,
-                  color: Colors.red,
-                  backgroundColor: Colors.grey.withValues(alpha: 0.2),
-                  minHeight: 12,
-                  borderRadius: BorderRadius.circular(10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(_video!.thumbnails.lowResUrl, width: 80, height: 45, fit: BoxFit.cover),
                 ),
-                const SizedBox(height: 10),
-                Text('${(_progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 16)),
+                const SizedBox(width: 12),
+                Expanded(child: Text(_video!.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))),
               ],
-            )
-          : _buildOptionsList(),
+            ),
+            const Divider(height: 30),
+
+            // 2. Qualities පෙන්වන කොටස (Audio සහ Video වෙන වෙනම)
+            Expanded(
+              child: ListView(
+                children: [
+                  const Text('Audio (Music)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.redAccent)),
+                  const SizedBox(height: 8),
+                  ..._manifest!.audioOnly.sortByBitrate().reversed.map((stream) => _buildOption(stream, true)),
+                  
+                  const Divider(height: 30),
+                  const Text('Video', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueAccent)),
+                  const SizedBox(height: 8),
+                  // Muxed කියන්නේ Audio + Video දෙකම තියෙන ඒවා
+                  ..._manifest!.muxed.sortByVideoQuality().reversed.map((stream) => _buildOption(stream, false)),
+                ],
+              ),
+            ),
+          ]
+        ],
+      ),
     );
   }
 
-  // වීඩියෝ විස්තර සහ කොලිටි තෝරන කොටස පෙන්වීම
-  Widget _buildOptionsList() {
-    if (_video == null || _manifest == null) return const Center(child: Text("Failed to load"));
+  Widget _buildOption(StreamInfo stream, bool isAudio) {
+    final qualityLabel = isAudio ? '${stream.bitrate.kiloBitsPerSecond.toInt()} kbps' : (stream as VideoStreamInfo).qualityLabel;
+    final sizeLabel = '${stream.size.totalMegaBytes.toStringAsFixed(1)} MB';
+    final format = stream.container.name.toUpperCase();
 
-    // Muxed කියන්නේ Audio+Video දෙකම එකට තියෙන ෆයිල් වලටයි
-    var videoStreams = _manifest!.muxed.sortByVideoQuality().toList();
-    var audioStream = _manifest!.audioOnly.withHighestBitrate();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(_video!.thumbnails.lowResUrl, height: 60, width: 60, fit: BoxFit.cover),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _video!.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-            ),
-          ],
-        ),
-        const Divider(height: 30),
-        const Text('Download Video (MP4)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-        const SizedBox(height: 10),
-        Expanded(
-          child: ListView.builder(
-            itemCount: videoStreams.length,
-            itemBuilder: (context, index) {
-              var stream = videoStreams[index];
-              var sizeStr = stream.size.totalMegaBytes.toStringAsFixed(1);
-              return ListTile(
-                leading: const Icon(Icons.video_library, color: Colors.red),
-                title: Text('${stream.videoQuality.name} Resolution'),
-                subtitle: Text('$sizeStr MB'),
-                trailing: const Icon(Icons.download),
-                onTap: () => _startDownload(stream, false),
+    return Consumer(
+      builder: (context, ref, child) {
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(isAudio ? Icons.music_note : Icons.videocam, color: isAudio ? Colors.redAccent : Colors.blueAccent),
+          title: Text('$format - $qualityLabel', style: const TextStyle(fontWeight: FontWeight.w500)),
+          trailing: ElevatedButton.icon(
+            onPressed: () {
+              final saveDir = ref.read(downloadLocationProvider);
+              // ඩවුන්ලෝඩ් එක පටන් ගන්නවා
+              ref.read(downloadProvider.notifier).startDownload(
+                _video!.id.value, _video!.title, stream.url.toString(), isAudio, saveDir
               );
+              Navigator.pop(context); // මෙනුව වහනවා
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download Started!'), backgroundColor: Colors.green));
             },
+            icon: const Icon(Icons.download, size: 18),
+            label: Text(sizeLabel),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[200], foregroundColor: Colors.black87, elevation: 0),
           ),
-        ),
-        const Divider(),
-        const Text('Download Audio (MP3)', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        ListTile(
-          leading: const Icon(Icons.music_note, color: Colors.blue),
-          title: const Text('High Quality Audio'),
-          subtitle: Text('${audioStream.size.totalMegaBytes.toStringAsFixed(1)} MB'),
-          trailing: const Icon(Icons.download),
-          onTap: () => _startDownload(audioStream, true),
-        ),
-      ],
+        );
+      }
     );
   }
 }

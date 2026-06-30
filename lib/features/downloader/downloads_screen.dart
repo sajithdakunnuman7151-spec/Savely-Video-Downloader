@@ -1,157 +1,193 @@
 // lib/features/downloader/downloads_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
-class DownloadsScreen extends StatefulWidget {
+import 'download_provider.dart';
+import '../settings/download_location.dart';
+
+class DownloadsScreen extends ConsumerStatefulWidget {
   const DownloadsScreen({super.key});
 
   @override
-  State<DownloadsScreen> createState() => _DownloadsScreenState();
+  ConsumerState<DownloadsScreen> createState() => _DownloadsScreenState();
 }
 
-class _DownloadsScreenState extends State<DownloadsScreen> {
-  List<FileSystemEntity> _files = [];
-  bool _isLoading = true;
+class _DownloadsScreenState extends ConsumerState<DownloadsScreen> {
+  List<FileSystemEntity> _downloadedFiles = [];
+  final Set<String> _selectedFiles = {}; 
+  bool _isSelectionMode = false;
 
   @override
   void initState() {
     super.initState();
-    _loadDownloadedFiles();
+    Future.microtask(() => _loadDownloadedFiles());
   }
 
-  // ෆෝන් එකේ Storage එකට ගිහින් අපේ ෆයිල්ස් ටික හොයන Function එක
   Future<void> _loadDownloadedFiles() async {
-    setState(() => _isLoading = true);
-    
-    try {
-      // 🌟 වෙබ් එක සඳහා ආරක්ෂිත වැට මෙන්න
-      if (kIsWeb) {
-        setState(() {
-          _files = []; 
-          _isLoading = false;
-        });
-        return;
-      }
-      // මීට යටින් තියෙන්නේ ඔයාගේ පරණ Android කෝඩ් එකමයි
-      Directory? directory;
-      if (Platform.isAndroid) {
-        directory = Directory('/storage/emulated/0/Download');
-      } else {
-        directory = await getApplicationDocumentsDirectory();
-      }
-     
+    if (kIsWeb) return;
+    final currentSaveLocation = ref.read(downloadLocationProvider);
+    if (currentSaveLocation.isEmpty) return;
 
-      if (directory.existsSync()) {
-        // ෆෝල්ඩර් එකේ තියෙන ඔක්කොම ෆයිල්ස් අරන්, අපේ App එකෙන් ආපු ඒවා විතරක් පෙරලා ගන්නවා
-        final List<FileSystemEntity> files = directory.listSync().where((file) {
-          return file.path.contains('Savely') &&
-              (file.path.endsWith('.mp4') || file.path.endsWith('.mp3'));
-        }).toList();
-
-        // අලුත්ම ෆයිල් එක උඩින්ම පේන්න ලිස්ට් එක හදනවා (Sort by date)
-        files.sort(
-            (a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-
-        setState(() {
-          _files = files;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error loading files: $e");
-    } finally {
-      setState(() => _isLoading = false);
+    Directory dir = Directory(currentSaveLocation);
+    if (dir.existsSync()) {
+      setState(() {
+        _downloadedFiles = dir.listSync()
+            .where((item) => item.path.endsWith('.mp4') || item.path.endsWith('.m4a') || item.path.endsWith('.mp3'))
+            .toList();
+      });
     }
+  }
+
+  // තෝරගත්තු ෆයිල්ස් මකන Function එක
+  void _deleteSelectedFiles() {
+    for (String path in _selectedFiles) {
+      File file = File(path);
+      if (file.existsSync()) file.deleteSync();
+    }
+    setState(() {
+      _selectedFiles.clear();
+      _isSelectionMode = false;
+    });
+    _loadDownloadedFiles();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Files deleted successfully')));
+  }
+
+  void _toggleSelection(String path) {
+    setState(() {
+      if (_selectedFiles.contains(path)) {
+        _selectedFiles.remove(path);
+        if (_selectedFiles.isEmpty) _isSelectionMode = false;
+      } else {
+        _selectedFiles.add(path);
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // 1. Loading වෙද්දී පෙනෙන විදිහ
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: Colors.red));
-    }
+    final activeDownloads = ref.watch(downloadProvider).values.where((task) => task.status != DownloadStatus.completed).toList();
 
-    // 2. මුකුත්ම ඩවුන්ලෝඩ් කරලා නැත්නම් පෙනෙන විදිහ
-    if (_files.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.folder_open, size: 80, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('No downloads yet.',
-                style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold)),
-            Text('Your downloaded videos will appear here.',
-                style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
-
-    // 3. ෆයිල්ස් තියෙනවා නම් පෙනෙන විදිහ (Pull to refresh කරන්නත් පුළුවන්)
-    return RefreshIndicator(
-      color: Colors.red,
-      onRefresh: _loadDownloadedFiles,
-      child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 80),
-        itemCount: _files.length,
-        itemBuilder: (context, index) {
-          final file = _files[index];
-          final fileName = file.path.split('/').last;
-          final isVideo = fileName.endsWith('.mp4');
-
-          // ෆයිල් එකේ සයිස් එක මෙගාබයිට් (MB) වලින් ගණනය කරනවා
-          final fileSize =
-              (file.statSync().size / (1024 * 1024)).toStringAsFixed(2);
-
-          // අපි දාපු නම ලස්සන කරලා පෙන්නනවා (අර "_Savely" කෑල්ල අයින් කරලා)
-          final cleanTitle = fileName
-              .replaceAll('_Savely.mp4', '')
-              .replaceAll('_Savely.mp3', '')
-              .replaceAll('_', ' ');
-
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            elevation: 2,
-            child: ListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              leading: CircleAvatar(
-                radius: 25,
-                backgroundColor: isVideo
-                    ? Colors.red.withValues(alpha: 0.1)
-                    : Colors.blue.withValues(alpha: 0.1),
-                child: Icon(
-                  isVideo ? Icons.play_arrow_rounded : Icons.music_note_rounded,
-                  color: isVideo ? Colors.red : Colors.blue,
-                  size: 30,
-                ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isSelectionMode ? '${_selectedFiles.length} Selected' : 'My Downloads'),
+        actions: [
+          if (_isSelectionMode)
+            IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: _deleteSelectedFiles)
+          else
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDownloadedFiles)
+        ],
+        leading: _isSelectionMode 
+            ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() { _isSelectionMode = false; _selectedFiles.clear(); }))
+            : null,
+      ),
+      body: CustomScrollView(
+        slivers: [
+          // --- 1. DOWNLOADING / PAUSED SECTION ---
+          if (activeDownloads.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text('Active Downloads (${activeDownloads.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
-              title: Text(
-                cleanTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 6.0),
-                child: Text(
-                    '$fileSize MB • ${isVideo ? 'MP4 Video' : 'MP3 Audio'}'),
-              ),
-              trailing:
-                  const Icon(Icons.open_in_new_rounded, color: Colors.grey),
-              onTap: () {
-                // බොත්තම එබුවම ෆෝන් එකේ තියෙන Player එකෙන් ප්ලේ කරනවා
-                OpenFilex.open(file.path);
-              },
             ),
-          );
-        },
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final task = activeDownloads[index];
+                  bool isPaused = task.status == DownloadStatus.paused;
+                  
+                  return ListTile(
+                    leading: Icon(isPaused ? Icons.pause_circle_filled : Icons.downloading, color: isPaused ? Colors.orange : Colors.blue, size: 40),
+                    title: Text(task.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 5),
+                        LinearProgressIndicator(value: task.progress, color: isPaused ? Colors.orange : Colors.blue),
+                        const SizedBox(height: 5),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('${task.downloadedSize} / ${task.totalSize}'),
+                            Text('${(task.progress * 100).toStringAsFixed(1)}%'),
+                          ],
+                        ),
+                      ],
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Pause / Resume Button
+                        IconButton(
+                          icon: Icon(isPaused ? Icons.play_arrow : Icons.pause, color: isPaused ? Colors.green : Colors.orange),
+                          onPressed: () {
+                            if (isPaused) {
+                              ref.read(downloadProvider.notifier).resumeDownload(task.id);
+                            } else {
+                              ref.read(downloadProvider.notifier).pauseDownload(task.id);
+                            }
+                          },
+                        ),
+                        // Cancel Button
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: () => ref.read(downloadProvider.notifier).cancelAndDelete(task.id),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                childCount: activeDownloads.length,
+              ),
+            ),
+          ],
+
+          // --- 2. COMPLETED SECTION (Long Press to Select & Delete) ---
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text('Completed', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+          ),
+          
+          if (_downloadedFiles.isEmpty)
+            const SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(20.0), child: Text('No downloaded files yet.', style: TextStyle(color: Colors.grey)))))
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  File file = File(_downloadedFiles[index].path);
+                  String fileName = file.path.split('/').last;
+                  String size = '${(file.lengthSync() / (1024 * 1024)).toStringAsFixed(1)} MB';
+                  bool isSelected = _selectedFiles.contains(file.path);
+
+                  return ListTile(
+                    selected: isSelected,
+                    selectedTileColor: Colors.redAccent.withValues(alpha: 0.1),
+                    onLongPress: () {
+                      setState(() => _isSelectionMode = true);
+                      _toggleSelection(file.path);
+                    },
+                    onTap: () {
+                      if (_isSelectionMode) {
+                        _toggleSelection(file.path);
+                      } else {
+                        // ප්ලේ කරන්න පුළුවන් දේවල් ඉදිරියේදී මෙතනට දාන්න
+                      }
+                    },
+                    leading: _isSelectionMode 
+                        ? Checkbox(value: isSelected, onChanged: (val) => _toggleSelection(file.path), activeColor: Colors.redAccent)
+                        : Icon(fileName.endsWith('.mp4') ? Icons.video_file : Icons.audio_file, color: Colors.green, size: 40),
+                    title: Text(fileName, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(size),
+                  );
+                },
+                childCount: _downloadedFiles.length,
+              ),
+            ),
+        ],
       ),
     );
   }
