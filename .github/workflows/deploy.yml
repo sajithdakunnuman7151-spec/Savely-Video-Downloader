@@ -1,6 +1,5 @@
 name: Flutter Web Deploy
 
-# ඔයා main branch එකට කෝඩ් එක push කරපු ගමන් මේක වැඩ කරන්න පටන් ගන්නවා
 on:
   push:
     branches:
@@ -9,6 +8,11 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    
+    # --- මෙන්න මේ කොටස අලුතින් එක් කරන්න ---
+    permissions:
+      contents: write
+    # --------------------------------------
 
     steps:
       - name: Checkout Repository
@@ -17,13 +21,12 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # අලුත්ම stable flutter version එක පාවිච්චි කරයි
+          channel: 'stable'
 
       - name: Get Dependencies
         run: flutter pub get
 
       - name: Build Web
-        # මෙතන base-href එකට ඔයාගේ Repository එකේ නම අනිවාර්යයෙන්ම දෙන්න ඕනේ
         run: flutter build web --release --base-href "/Savely-Video-Downloader/"
 
       - name: Deploy to GitHub Pages
